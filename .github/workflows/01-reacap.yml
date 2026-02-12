@@ -1,0 +1,18 @@
+name: 01-reacap.yml
+
+on:
+  workflow_dispatch:
+    inputs:
+      country:
+        required: true
+
+jobs:
+  hello-world:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Say hello
+        run: echo "Hello, world!" ${{ github.event.inputs.name }}
+      - name: List files
+        run: ls -la
+      - name: Checkout
+        run: actions/checkout@v2
