@@ -3,7 +3,15 @@ name: 01-reacap.yml
 on:
   workflow_dispatch:
     inputs:
+      name:
+        description: "Name"
+        default: "Aryan"
+        required: true
+      city:
+        default: "Delhi"
+        required: true
       country:
+        default: "India"
         required: true
 
 jobs:
