@@ -1,5 +1,17 @@
 on:
   workflow_dispatch:
+    inputs:
+      name:
+        description: "Name"
+        default: "Aryan"
+        required: true
+      city:
+        default: "Delhi"
+        required: true
+      country:
+        default: "India"
+        required: true
+
 jobs:
   hello-world:
     runs-on: ubuntu-latest
