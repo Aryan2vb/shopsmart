@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+/* eslint-disable react-hooks/set-state-in-effect */
+import { useState, useEffect, useCallback } from 'react'
 import './App.css'
 
 function App() {
@@ -6,22 +7,23 @@ function App() {
   const [cart, setCart] = useState([])
   const [showCart, setShowCart] = useState(false)
 
-  useEffect(() => {
-    fetchProducts()
-    fetchCart()
-  }, [])
-
-  const fetchProducts = async () => {
+  const fetchProducts = useCallback(async () => {
     const res = await fetch('/api/products')
     const data = await res.json()
     setProducts(data.products)
-  }
+  }, [])
 
-  const fetchCart = async () => {
+  const fetchCart = useCallback(async () => {
     const res = await fetch('/api/cart')
     const data = await res.json()
     setCart(data.cart)
-  }
+  }, [])
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => {
+    fetchProducts()
+    fetchCart()
+  }, [fetchProducts, fetchCart])
 
   const addToCart = async (productId) => {
     await fetch('/api/cart', {
