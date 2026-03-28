@@ -1,0 +1,32 @@
+name: Deployment
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_run:
+    workflows: ["CI/CD Pipeline"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    if: ${{ github.event_name == 'push' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AWS_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.AWS_EC2_IP }} >> ~/.ssh/known_hosts
+
+      - name: Deploy Scripts and Setup
+        run: |
+          # Copy scripts and docker-compose
+          rsync -avz -e "ssh -i ~/.ssh/id_rsa" ./docker-compose.yml ./scripts/ ${{ secrets.AWS_USERNAME }}@${{ secrets.AWS_EC2_IP }}:~/project/
+          
+          # Run idempotent deployment script on EC2
+          ssh -i ~/.ssh/id_rsa ${{ secrets.AWS_USERNAME }}@${{ secrets.AWS_EC2_IP }} "bash ~/project/deploy.sh"

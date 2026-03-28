@@ -66,9 +66,10 @@ describe('App Component - Integration Tests', () => {
     const user = userEvent.setup()
     
     fetch
-      .mockResolvedValueOnce({ json: async () => ({ products: mockProducts }) })
-      .mockResolvedValueOnce({ json: async () => ({ cart: [] }) })
-      .mockResolvedValueOnce({ json: async () => ({ cart: [{ ...mockProducts[0], quantity: 1 }] }) })
+      .mockResolvedValueOnce({ json: async () => ({ products: mockProducts }) }) // initial products
+      .mockResolvedValueOnce({ json: async () => ({ cart: [] }) })             // initial cart
+      .mockResolvedValueOnce({ json: async () => ({ success: true }) })        // POST add to cart
+      .mockResolvedValueOnce({ json: async () => ({ cart: [{ ...mockProducts[0], quantity: 1 }] }) }) // fetchCart after add
 
     render(<App />)
     
@@ -120,20 +121,20 @@ describe('App Component - Integration Tests', () => {
     const cartWithItem = [{ ...mockProducts[0], quantity: 2, price: 79.99 }]
     
     fetch
-      .mockResolvedValueOnce({ json: async () => ({ products: mockProducts }) })
-      .mockResolvedValueOnce({ json: async () => ({ cart: [] }) })
-      .mockResolvedValueOnce({ json: async () => ({ cart: cartWithItem }) })
-      .mockResolvedValueOnce({ json: async () => ({ cart: cartWithItem }) })
+      .mockResolvedValueOnce({ json: async () => ({ products: mockProducts }) }) // initial products
+      .mockResolvedValueOnce({ json: async () => ({ cart: cartWithItem }) })    // initial cart
+      .mockResolvedValueOnce({ json: async () => ({ cart: cartWithItem }) })    // extra call if any
 
     render(<App />)
     
-    await waitFor(() => screen.getByText('Cart (0)'))
-    await user.click(screen.getByText('Cart (0)'))
+    await waitFor(() => screen.getByText('Cart (2)'))
+    await user.click(screen.getByText('Cart (2)'))
 
-    expect(screen.getByText('Your cart is empty')).toBeInTheDocument()
+    expect(screen.getByText('Your Cart')).toBeInTheDocument()
+    expect(screen.getByText('Wireless Headphones')).toBeInTheDocument()
     
     await user.click(screen.getByText('Back to Shop'))
     
-    await waitFor(() => screen.getByText('Cart (0)'))
+    await waitFor(() => screen.getByText('Cart (2)'))
   })
 })
