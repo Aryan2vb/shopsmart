@@ -16,19 +16,29 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-# 3. Stop existing services (if any) and handle errors gracefully
+# 3. Determine docker-compose command
+if docker compose version &> /dev/null; then
+    DOCKER_COMPOSE="docker compose"
+elif docker-compose --version &> /dev/null; then
+    DOCKER_COMPOSE="docker-compose"
+else
+    echo "docker-compose not found, please install it on EC2."
+    exit 1
+fi
+
+# 4. Stop existing services (if any) and handle errors gracefully
 # Using || true to ignore errors if services are not running
-docker-compose down || true
+$DOCKER_COMPOSE down || true
 
-# 4. Pull/Build new images
-docker-compose build
+# 5. Build new images
+$DOCKER_COMPOSE build
 
-# 5. Start services in background
-docker-compose up -d
+# 6. Start services in background
+$DOCKER_COMPOSE up -d
 
-# 6. Verify health (Optional but good for DevOps)
+# 7. Verify health (Optional but good for DevOps)
 echo "Checking service status..."
-docker-compose ps
+$DOCKER_COMPOSE ps
 
 # 7. Set correct permissions for data/logs if needed
 chmod -R 755 ~/project/
