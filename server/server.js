@@ -18,6 +18,10 @@ let products = [
 
 let cart = [];
 
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
 app.get('/api/products', (req, res) => {
   res.json({ products });
 });

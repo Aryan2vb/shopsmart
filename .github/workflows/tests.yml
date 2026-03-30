@@ -82,9 +82,7 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
       - name: Start services
-        run: docker compose up -d
-      - name: Wait for services
-        run: sleep 10
+        run: docker compose up -d --wait
       - name: Run E2E tests
         run: npx playwright test
       - name: Stop services
