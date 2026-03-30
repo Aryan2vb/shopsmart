@@ -82,13 +82,7 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
       - name: Start services
-        run: docker compose up -d
-      - name: Wait for services
-        run: |
-          echo "Waiting for server to be ready..."
-          curl --retry 30 --retry-delay 2 --retry-connrefused --silent --show-error --fail --output /dev/null http://localhost:3000/api/products
-          echo "Waiting for client to be ready..."
-          curl --retry 30 --retry-delay 2 --retry-connrefused --silent --show-error --fail --output /dev/null http://localhost:8080
+        run: docker compose up -d --wait
       - name: Run E2E tests
         run: npx playwright test
       - name: Stop services
