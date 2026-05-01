@@ -7,6 +7,10 @@ const PORT = 3000;
 app.use(cors());
 app.use(express.json());
 
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
 let products = [
   { id: 1, name: 'Wireless Headphones', price: 79.99, image: 'https://placehold.co/200x200?text=Headphones' },
   { id: 2, name: 'Smart Watch', price: 199.99, image: 'https://placehold.co/200x200?text=Watch' },
