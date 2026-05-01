@@ -1,0 +1,170 @@
+name: Rubric AWS ECS Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  TF_VAR_aws_region: ${{ secrets.AWS_REGION }}
+
+jobs:
+  tests:
+    name: Phase 1 - Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Prepare test report directory
+        run: mkdir -p test-results
+
+      - name: Run backend unit tests
+        working-directory: server
+        run: npm test -- --ci --json --outputFile=../test-results/backend-jest.json
+
+      - name: Install client dependencies
+        working-directory: client
+        run: npm ci
+
+      - name: Run frontend unit and integration tests
+        working-directory: client
+        run: npm test -- --reporter=default --reporter=junit --outputFile=../test-results/frontend-vitest.xml
+
+      - name: Install E2E dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Start integration stack
+        run: docker compose up -d --build
+
+      - name: Run integration tests
+        run: npx playwright test --reporter=list,junit
+        env:
+          PLAYWRIGHT_JUNIT_OUTPUT_NAME: test-results/playwright-junit.xml
+
+      - name: Stop integration stack
+        if: always()
+        run: docker compose down
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: test-results/
+
+  terraform:
+    name: Phase 2 - Terraform
+    needs: tests
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      ecr_repository_url: ${{ steps.tf-output.outputs.ecr_repository_url }}
+      ecs_cluster_name: ${{ steps.tf-output.outputs.ecs_cluster_name }}
+      ecs_service_name: ${{ steps.tf-output.outputs.ecs_service_name }}
+      alb_dns_name: ${{ steps.tf-output.outputs.alb_dns_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform init
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform validate
+        working-directory: terraform
+        run: terraform validate
+
+      - name: Terraform plan
+        working-directory: terraform
+        run: terraform plan -out=tfplan
+
+      - name: Terraform apply
+        working-directory: terraform
+        run: terraform apply -auto-approve tfplan
+
+      - name: Capture Terraform outputs
+        id: tf-output
+        working-directory: terraform
+        run: |
+          echo "ecr_repository_url=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_OUTPUT"
+          echo "ecs_cluster_name=$(terraform output -raw ecs_cluster_name)" >> "$GITHUB_OUTPUT"
+          echo "ecs_service_name=$(terraform output -raw ecs_service_name)" >> "$GITHUB_OUTPUT"
+          echo "alb_dns_name=$(terraform output -raw alb_dns_name)" >> "$GITHUB_OUTPUT"
+
+  deploy-ecs:
+    name: Phase 3 - Build, Push, Deploy ECS
+    needs: terraform
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
+        env:
+          ECR_REPOSITORY_URL: ${{ needs.terraform.outputs.ecr_repository_url }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t "$ECR_REPOSITORY_URL:$IMAGE_TAG" -t "$ECR_REPOSITORY_URL:latest" ./server
+          docker push "$ECR_REPOSITORY_URL:$IMAGE_TAG"
+          docker push "$ECR_REPOSITORY_URL:latest"
+
+      - name: Update ECS task definition and service
+        working-directory: terraform
+        env:
+          TF_VAR_container_image: ${{ needs.terraform.outputs.ecr_repository_url }}:${{ github.sha }}
+          TF_VAR_desired_count: 1
+        run: |
+          terraform init
+          terraform apply -auto-approve
+
+      - name: Verify ECS service rollout
+        env:
+          ECS_CLUSTER_NAME: ${{ needs.terraform.outputs.ecs_cluster_name }}
+          ECS_SERVICE_NAME: ${{ needs.terraform.outputs.ecs_service_name }}
+        run: aws ecs wait services-stable --cluster "$ECS_CLUSTER_NAME" --services "$ECS_SERVICE_NAME"
+
+      - name: Verify service endpoint
+        env:
+          ALB_DNS_NAME: ${{ needs.terraform.outputs.alb_dns_name }}
+        run: curl --fail --retry 12 --retry-delay 10 "http://$ALB_DNS_NAME/health"

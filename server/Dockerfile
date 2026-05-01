@@ -1,20 +1,27 @@
-# Use an official Node.js runtime as the base image
-FROM node:20-alpine
+# Stage 1: install production dependencies
+FROM node:20-alpine AS deps
 
-# Set the working directory in the container
 WORKDIR /app
 
-# Copy package.json and package-lock.json first to leverage Docker cache
 COPY package*.json ./
+RUN npm ci --omit=dev
 
-# Install dependencies
-RUN npm install
+# Stage 2: run the server as a non-root user
+FROM node:20-alpine AS runner
 
-# Copy the rest of the server code
-COPY . .
+ENV NODE_ENV=production
+WORKDIR /app
 
-# Expose the port the server listens on
+COPY --from=deps /app/node_modules ./node_modules
+COPY package*.json ./
+COPY server.js ./
+
+RUN addgroup -S shopsmart && adduser -S shopsmart -G shopsmart
+USER shopsmart
+
 EXPOSE 3000
 
-# Start the server
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3000/health || exit 1
+
 CMD ["npm", "start"]
