@@ -4,6 +4,10 @@ provider "aws" {
 
 data "aws_caller_identity" "current" {}
 
+data "aws_iam_role" "lab_role" {
+  name = "LabRole"
+}
+
 locals {
   name_suffix = substr(md5("${data.aws_caller_identity.current.account_id}-${var.aws_region}-${var.project_name}"), 0, 8)
   name        = "${var.project_name}-${local.name_suffix}"
@@ -203,28 +207,6 @@ resource "aws_ecs_cluster" "main" {
   tags = local.common_tags
 }
 
-resource "aws_iam_role" "ecs_task_execution" {
-  name = "${local.name}-ecs-task-execution"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = {
-        Service = "ecs-tasks.amazonaws.com"
-      }
-      Action = "sts:AssumeRole"
-    }]
-  })
-
-  tags = local.common_tags
-}
-
-resource "aws_iam_role_policy_attachment" "ecs_task_execution" {
-  role       = aws_iam_role.ecs_task_execution.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-}
-
 resource "aws_cloudwatch_log_group" "app" {
   name              = "/ecs/${local.name}"
   retention_in_days = 7
@@ -238,7 +220,7 @@ resource "aws_ecs_task_definition" "app" {
   network_mode             = "awsvpc"
   cpu                      = 256
   memory                   = 512
-  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
+  execution_role_arn       = data.aws_iam_role.lab_role.arn
 
   container_definitions = jsonencode([{
     name      = "server"
