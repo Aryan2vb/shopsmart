@@ -6,7 +6,7 @@ variable "aws_region" {
 variable "project_name" {
   description = "Short project name used in resource names."
   type        = string
-  default     = "shopsmart-v2"
+  default     = "shopsmart"
 }
 
 variable "container_image" {
