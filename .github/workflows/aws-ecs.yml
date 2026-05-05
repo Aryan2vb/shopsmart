@@ -103,10 +103,6 @@ jobs:
         working-directory: terraform
         run: terraform validate
 
-      - name: Terraform plan
-        working-directory: terraform
-        run: terraform plan -out=tfplan
-
       - name: Discover and Auto-Import existing resources
         working-directory: terraform
         run: |
@@ -116,71 +112,89 @@ jobs:
           echo "Project Resource Name: $NAME"
           
           : > imports.tf
-          
-          # 1. S3 Bucket
-          if aws s3api head-bucket --bucket "${NAME}-artifacts" 2>/dev/null; then
-            echo "Found existing S3 Bucket, adding to imports."
+
+          add_import() {
+            local address="$1"
+            local id="$2"
+
             cat <<EOF >> imports.tf
           import {
-            to = aws_s3_bucket.artifacts
-            id = "${NAME}-artifacts"
+            to = $address
+            id = "$id"
           }
+
           EOF
+          }
+
+          # 1. S3 Bucket
+          BUCKET_NAME="${NAME}-artifacts"
+          OWNED_BUCKET=$(aws s3api list-buckets --query "Buckets[?Name=='${BUCKET_NAME}'].Name | [0]" --output text 2>/dev/null || echo "")
+          if [ "$OWNED_BUCKET" = "$BUCKET_NAME" ]; then
+            echo "Found existing S3 Bucket, adding to imports."
+            add_import "aws_s3_bucket.artifacts" "$BUCKET_NAME"
+          elif aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+            echo "Found existing S3 Bucket, adding to imports."
+            add_import "aws_s3_bucket.artifacts" "$BUCKET_NAME"
           fi
           
           # 2. ECR Repository
           if aws ecr describe-repositories --repository-names "shopsmart-server" 2>/dev/null; then
             echo "Found existing ECR Repo, adding to imports."
-            cat <<EOF >> imports.tf
-          import {
-            to = aws_ecr_repository.app
-            id = "shopsmart-server"
-          }
-          EOF
+            add_import "aws_ecr_repository.app" "shopsmart-server"
           fi
           
           # 3. ALB
           ALB_ARN=$(aws elbv2 describe-load-balancers --names "${NAME}-alb" --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || echo "")
           if [ -n "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ]; then
             echo "Found existing ALB, adding to imports."
-            cat <<EOF >> imports.tf
-          import {
-            to = aws_lb.app
-            id = "$ALB_ARN"
-          }
-          EOF
+            add_import "aws_lb.app" "$ALB_ARN"
           fi
           
           # 4. Target Group
           TG_ARN=$(aws elbv2 describe-target-groups --names "${NAME}-tg" --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || echo "")
           if [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ]; then
             echo "Found existing Target Group, adding to imports."
-            cat <<EOF >> imports.tf
-          import {
-            to = aws_lb_target_group.app
-            id = "$TG_ARN"
-          }
-          EOF
+            add_import "aws_lb_target_group.app" "$TG_ARN"
+          fi
+
+          # 5. ALB Listener
+          if [ -n "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ]; then
+            LISTENER_ARN=$(aws elbv2 describe-listeners --load-balancer-arn "$ALB_ARN" --query 'Listeners[?Port==`80`].ListenerArn | [0]' --output text 2>/dev/null || echo "")
+            if [ -n "$LISTENER_ARN" ] && [ "$LISTENER_ARN" != "None" ]; then
+              echo "Found existing ALB Listener, adding to imports."
+              add_import "aws_lb_listener.http" "$LISTENER_ARN"
+            fi
           fi
           
-          # 5. CloudWatch Log Group
-          if aws logs describe-log-groups --log-group-name-prefix "/ecs/${NAME}" | grep -q "\"logGroupName\": \"/ecs/${NAME}\""; then
+          # 6. CloudWatch Log Group
+          LOG_GROUP_NAME=$(aws logs describe-log-groups --log-group-name-prefix "/ecs/${NAME}" --query "logGroups[?logGroupName=='/ecs/${NAME}'].logGroupName | [0]" --output text 2>/dev/null || echo "")
+          if [ "$LOG_GROUP_NAME" = "/ecs/${NAME}" ]; then
             echo "Found existing Log Group, adding to imports."
-            cat <<EOF >> imports.tf
-          import {
-            to = aws_cloudwatch_log_group.app
-            id = "/ecs/${NAME}"
-          }
-          EOF
+            add_import "aws_cloudwatch_log_group.app" "$LOG_GROUP_NAME"
+          fi
+
+          # 7. ECS Cluster
+          ECS_CLUSTER_NAME=$(aws ecs describe-clusters --clusters "${NAME}-cluster" --query 'clusters[?status==`ACTIVE`].clusterName | [0]' --output text 2>/dev/null || echo "")
+          if [ "$ECS_CLUSTER_NAME" = "${NAME}-cluster" ]; then
+            echo "Found existing ECS Cluster, adding to imports."
+            add_import "aws_ecs_cluster.main" "$ECS_CLUSTER_NAME"
+
+            ECS_SERVICE_NAME=$(aws ecs describe-services --cluster "$ECS_CLUSTER_NAME" --services "${NAME}-service" --query 'services[?status!=`INACTIVE`].serviceName | [0]' --output text 2>/dev/null || echo "")
+            if [ "$ECS_SERVICE_NAME" = "${NAME}-service" ]; then
+              echo "Found existing ECS Service, adding to imports."
+              add_import "aws_ecs_service.app" "${ECS_CLUSTER_NAME}/${ECS_SERVICE_NAME}"
+            fi
           fi
           
-          # If we generated any imports, we need to refresh the plan
           if [ -s imports.tf ]; then
             echo "Generated imports.tf content:"
             cat imports.tf
-            echo "Refreshing plan with discovered resources..."
-            terraform plan -out=tfplan
+          else
+            echo "No existing resources discovered for import."
           fi
+
+          echo "Creating Terraform plan..."
+          terraform plan -out=tfplan
       - name: Terraform apply
         working-directory: terraform
         run: terraform apply -auto-approve tfplan
