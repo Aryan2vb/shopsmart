@@ -1,8 +1,12 @@
 const express = require('express');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 const PORT = 3000;
+const publicDir = path.join(__dirname, 'public');
+const indexHtml = path.join(publicDir, 'index.html');
 
 app.use(cors());
 app.use(express.json());
@@ -53,6 +57,14 @@ app.delete('/api/cart/:id', (req, res) => {
   cart = cart.filter(item => item.id !== productId);
   res.json({ cart });
 });
+
+if (fs.existsSync(indexHtml)) {
+  app.use(express.static(publicDir));
+
+  app.get('*', (req, res) => {
+    res.sendFile(indexHtml);
+  });
+}
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);

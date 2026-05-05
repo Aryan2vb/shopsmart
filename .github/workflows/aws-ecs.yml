@@ -264,7 +264,7 @@ jobs:
             exit 1
           fi
           echo "Building image for repository: $ECR_REPOSITORY_URL with tag: $IMAGE_TAG"
-          docker build -t "$ECR_REPOSITORY_URL:$IMAGE_TAG" -t "$ECR_REPOSITORY_URL:latest" ./server
+          docker build -f server/Dockerfile -t "$ECR_REPOSITORY_URL:$IMAGE_TAG" -t "$ECR_REPOSITORY_URL:latest" .
           docker push "$ECR_REPOSITORY_URL:$IMAGE_TAG"
           docker push "$ECR_REPOSITORY_URL:latest"
 

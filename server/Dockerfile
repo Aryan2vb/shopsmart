@@ -1,20 +1,32 @@
-# Stage 1: install production dependencies
-FROM node:20-alpine AS deps
+# Stage 1: build the React client
+FROM node:20-alpine AS client-build
 
-WORKDIR /app
+WORKDIR /app/client
 
-COPY package*.json ./
+COPY client/package*.json ./
+RUN npm ci
+
+COPY client/ ./
+RUN npm run build
+
+# Stage 2: install production server dependencies
+FROM node:20-alpine AS server-deps
+
+WORKDIR /app/server
+
+COPY server/package*.json ./
 RUN npm ci --omit=dev
 
-# Stage 2: run the server as a non-root user
+# Stage 3: run the server and serve the built client
 FROM node:20-alpine AS runner
 
 ENV NODE_ENV=production
 WORKDIR /app
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY package*.json ./
-COPY server.js ./
+COPY --from=server-deps /app/server/node_modules ./node_modules
+COPY server/package*.json ./
+COPY server/server.js ./
+COPY --from=client-build /app/client/dist ./public
 
 RUN addgroup -S shopsmart && adduser -S shopsmart -G shopsmart
 USER shopsmart
