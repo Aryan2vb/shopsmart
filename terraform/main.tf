@@ -2,31 +2,6 @@ provider "aws" {
   region = var.aws_region
 }
 
-import {
-  to = aws_s3_bucket.artifacts
-  id = "shopsmart-85c63698-artifacts"
-}
-
-import {
-  to = aws_ecr_repository.app
-  id = "021913566279/shopsmart-server"
-}
-
-import {
-  to = aws_lb.app
-  id = "shopsmart-85c63698-alb"
-}
-
-import {
-  to = aws_lb_target_group.app
-  id = "shopsmart-85c63698-tg"
-}
-
-import {
-  to = aws_cloudwatch_log_group.app
-  id = "/ecs/shopsmart-85c63698"
-}
-
 data "aws_caller_identity" "current" {}
 
 data "aws_iam_role" "lab_role" {
@@ -246,6 +221,7 @@ resource "aws_ecs_task_definition" "app" {
   cpu                      = 256
   memory                   = 512
   execution_role_arn       = data.aws_iam_role.lab_role.arn
+  task_role_arn            = data.aws_iam_role.lab_role.arn
 
   container_definitions = jsonencode([{
     name      = "server"
