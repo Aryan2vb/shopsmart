@@ -235,13 +235,32 @@ jobs:
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Resolve deployment resources
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          NAME_SUFFIX=$(printf "%s" "${ACCOUNT_ID}-${AWS_REGION}-shopsmart" | md5sum | awk '{print substr($1, 1, 8)}')
+          RESOURCE_NAME="shopsmart-${NAME_SUFFIX}"
+
+          ECR_REPOSITORY_URL="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/shopsmart-server"
+          ALB_DNS_NAME=$(aws elbv2 describe-load-balancers \
+            --names "${RESOURCE_NAME}-alb" \
+            --query 'LoadBalancers[0].DNSName' \
+            --output text)
+
+          echo "ECR_REPOSITORY_URL=$ECR_REPOSITORY_URL" >> "$GITHUB_ENV"
+          echo "RESOURCE_NAME=$RESOURCE_NAME" >> "$GITHUB_ENV"
+          echo "ECS_CLUSTER_NAME=${RESOURCE_NAME}-cluster" >> "$GITHUB_ENV"
+          echo "ECS_SERVICE_NAME=${RESOURCE_NAME}-service" >> "$GITHUB_ENV"
+          echo "ALB_DNS_NAME=$ALB_DNS_NAME" >> "$GITHUB_ENV"
+
+          echo "Resolved deployment resources for $RESOURCE_NAME."
+
       - name: Build and push Docker image
         env:
-          ECR_REPOSITORY_URL: ${{ needs.terraform.outputs.ecr_repository_url }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
           if [ -z "$ECR_REPOSITORY_URL" ]; then
-            echo "Error: ECR_REPOSITORY_URL is empty. Check Phase 2 outputs."
+            echo "Error: ECR_REPOSITORY_URL is empty. Check ECR repository discovery."
             exit 1
           fi
           echo "Building image for repository: $ECR_REPOSITORY_URL with tag: $IMAGE_TAG"
@@ -250,21 +269,66 @@ jobs:
           docker push "$ECR_REPOSITORY_URL:latest"
 
       - name: Update ECS task definition and service
-        working-directory: terraform
         env:
-          TF_VAR_container_image: ${{ needs.terraform.outputs.ecr_repository_url }}:${{ github.sha }}
-          TF_VAR_desired_count: 1
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          terraform init
-          terraform apply -auto-approve
+          TASK_ROLE_ARN=$(aws iam get-role --role-name LabRole --query 'Role.Arn' --output text)
+          CONTAINER_IMAGE="${ECR_REPOSITORY_URL}:${IMAGE_TAG}"
+
+          cat > task-definition.json <<EOF
+          {
+            "family": "${RESOURCE_NAME}-task",
+            "networkMode": "awsvpc",
+            "requiresCompatibilities": ["FARGATE"],
+            "cpu": "256",
+            "memory": "512",
+            "executionRoleArn": "$TASK_ROLE_ARN",
+            "taskRoleArn": "$TASK_ROLE_ARN",
+            "containerDefinitions": [
+              {
+                "name": "server",
+                "image": "$CONTAINER_IMAGE",
+                "essential": true,
+                "portMappings": [
+                  {
+                    "containerPort": 3000,
+                    "hostPort": 3000,
+                    "protocol": "tcp"
+                  }
+                ],
+                "healthCheck": {
+                  "command": ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"],
+                  "interval": 30,
+                  "timeout": 5,
+                  "retries": 3,
+                  "startPeriod": 10
+                },
+                "logConfiguration": {
+                  "logDriver": "awslogs",
+                  "options": {
+                    "awslogs-group": "/ecs/${RESOURCE_NAME}",
+                    "awslogs-region": "${AWS_REGION}",
+                    "awslogs-stream-prefix": "server"
+                  }
+                }
+              }
+            ]
+          }
+          EOF
+
+          TASK_DEFINITION_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://task-definition.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --service "$ECS_SERVICE_NAME" \
+            --task-definition "$TASK_DEFINITION_ARN" \
+            --desired-count 1
 
       - name: Verify ECS service rollout
-        env:
-          ECS_CLUSTER_NAME: ${{ needs.terraform.outputs.ecs_cluster_name }}
-          ECS_SERVICE_NAME: ${{ needs.terraform.outputs.ecs_service_name }}
         run: aws ecs wait services-stable --cluster "$ECS_CLUSTER_NAME" --services "$ECS_SERVICE_NAME"
 
       - name: Verify service endpoint
-        env:
-          ALB_DNS_NAME: ${{ needs.terraform.outputs.alb_dns_name }}
         run: curl --fail --retry 12 --retry-delay 10 "http://$ALB_DNS_NAME/health"
