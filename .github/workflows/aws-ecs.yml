@@ -112,41 +112,66 @@ jobs:
         run: |
           echo "Checking for existing resources to auto-import..."
           # Calculate the deterministic resource name from Terraform
-          NAME=$(terraform console -eval='local.name' | tr -d '"')
+          NAME=$(echo 'local.name' | terraform console | tr -d '"')
           echo "Project Resource Name: $NAME"
           
-          echo "" > imports.tf
+          : > imports.tf
           
           # 1. S3 Bucket
           if aws s3api head-bucket --bucket "${NAME}-artifacts" 2>/dev/null; then
             echo "Found existing S3 Bucket, adding to imports."
-            echo "import { to = aws_s3_bucket.artifacts; id = \"${NAME}-artifacts\" }" >> imports.tf
+            cat <<EOF >> imports.tf
+          import {
+            to = aws_s3_bucket.artifacts
+            id = "${NAME}-artifacts"
+          }
+          EOF
           fi
           
           # 2. ECR Repository
           if aws ecr describe-repositories --repository-names "shopsmart-server" 2>/dev/null; then
             echo "Found existing ECR Repo, adding to imports."
-            echo "import { to = aws_ecr_repository.app; id = \"shopsmart-server\" }" >> imports.tf
+            cat <<EOF >> imports.tf
+          import {
+            to = aws_ecr_repository.app
+            id = "shopsmart-server"
+          }
+          EOF
           fi
           
           # 3. ALB
           ALB_ARN=$(aws elbv2 describe-load-balancers --names "${NAME}-alb" --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || echo "")
           if [ -n "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ]; then
             echo "Found existing ALB, adding to imports."
-            echo "import { to = aws_lb.app; id = \"$ALB_ARN\" }" >> imports.tf
+            cat <<EOF >> imports.tf
+          import {
+            to = aws_lb.app
+            id = "$ALB_ARN"
+          }
+          EOF
           fi
           
           # 4. Target Group
           TG_ARN=$(aws elbv2 describe-target-groups --names "${NAME}-tg" --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || echo "")
           if [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ]; then
             echo "Found existing Target Group, adding to imports."
-            echo "import { to = aws_lb_target_group.app; id = \"$TG_ARN\" }" >> imports.tf
+            cat <<EOF >> imports.tf
+          import {
+            to = aws_lb_target_group.app
+            id = "$TG_ARN"
+          }
+          EOF
           fi
           
           # 5. CloudWatch Log Group
           if aws logs describe-log-groups --log-group-name-prefix "/ecs/${NAME}" | grep -q "\"logGroupName\": \"/ecs/${NAME}\""; then
             echo "Found existing Log Group, adding to imports."
-            echo "import { to = aws_cloudwatch_log_group.app; id = \"/ecs/${NAME}\" }" >> imports.tf
+            cat <<EOF >> imports.tf
+          import {
+            to = aws_cloudwatch_log_group.app
+            id = "/ecs/${NAME}"
+          }
+          EOF
           fi
           
           # If we generated any imports, we need to refresh the plan
